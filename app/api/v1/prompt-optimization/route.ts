@@ -1,7 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import OpenAI from "openai";
 import { jsonToSchema } from "@/app/lib/quicktype-helpers";
-import { META_PROMPT, parseOptimizationResponse } from "@/app/lib/meta-prompt";
+import { META_PROMPT } from "@/app/lib/meta-prompt";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY ?? "",
@@ -17,10 +17,10 @@ export async function POST(req: NextRequest) {
     feedback: string;
   };
 
-  // Replace {{context}} with actual context
+  // 1. Replace {{context}} in the prompt
   const resolvedPrompt = prompt.replace(/\{\{context\}\}/g, context ?? "");
 
-  // Convert expected_output to JSON Schema
+  // 2. Convert expected_output to JSON Schema and append to prompt
   let schema = "";
   try {
     const jsonStr =
@@ -32,55 +32,25 @@ export async function POST(req: NextRequest) {
     schema = "";
   }
 
-  const fullPromptForMeta = `Current prompt:\n${resolvedPrompt}\n\n${
-    schema ? `Expected output JSON Schema:\n${schema}\n\n` : ""
-  }User feedback:\n${feedback || "(no feedback, just optimize for clarity and effectiveness)"}`;
+  const promptWithSchema = resolvedPrompt + (schema ? `\n\nOutput JSON Schema:\n${schema}` : "");
 
-  const encoder = new TextEncoder();
-  const id = crypto.randomUUID();
+  // 3. Build user message for the meta-prompt
+  const userMessage = `Current prompt:\n${promptWithSchema}\n\nUser feedback:\n${
+    feedback || "(no feedback, just optimize for clarity and effectiveness)"
+  }`;
 
-  const stream = new ReadableStream({
-    async start(controller) {
-      const enqueue = (data: object) => {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
-      };
-
-      try {
-        const completion = await openai.chat.completions.create({
-          model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
-          messages: [
-            { role: "system", content: META_PROMPT },
-            { role: "user", content: fullPromptForMeta },
-          ],
-          stream: true,
-        });
-
-        let fullContent = "";
-
-        for await (const chunk of completion) {
-          const delta = chunk.choices[0]?.delta?.content ?? "";
-          if (!delta) continue;
-          fullContent += delta;
-
-          // Stream reasoning chunks as they arrive (before </reasoning> is closed)
-          enqueue({ id, type: "reasoning", content: delta });
-        }
-
-        // Parse the full response and emit the final prompt
-        const { prompt: optimizedPrompt } = parseOptimizationResponse(fullContent);
-        const finalPrompt = optimizedPrompt + (schema ? `\n\nOutput JSON Schema:\n${schema}` : "");
-        enqueue({ id, type: "prompt", content: finalPrompt });
-        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-      } catch (err: any) {
-        enqueue({ id, type: "reasoning", content: `Error: ${err.message}` });
-        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-      } finally {
-        controller.close();
-      }
-    },
+  // 4. Call LLM with streaming and pass the stream as-is
+  const completion = await openai.chat.completions.create({
+    model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
+    messages: [
+      { role: "system", content: META_PROMPT },
+      { role: "user", content: userMessage },
+    ],
+    stream: true,
   });
 
-  return new Response(stream, {
+  // Pass the raw OpenAI SSE stream directly to the client
+  return new Response(completion.toReadableStream(), {
     headers: {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",

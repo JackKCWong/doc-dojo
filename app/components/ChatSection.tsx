@@ -2,6 +2,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAppStore, ChatMessage } from "../store";
 
+/**
+ * Parse the optimized prompt from the LLM's full text response.
+ * The meta-prompt instructs the model to separate with "--- OPTIMIZED PROMPT ---".
+ */
+function extractOptimizedPrompt(fullText: string): string {
+  const separator = "--- OPTIMIZED PROMPT ---";
+  const idx = fullText.indexOf(separator);
+  if (idx !== -1) {
+    return fullText.slice(idx + separator.length).trim();
+  }
+  // Fallback: return the whole text if no separator found
+  return fullText.trim();
+}
+
 export default function ChatSection() {
   const {
     messages,
@@ -34,7 +48,6 @@ export default function ChatSection() {
   }, [files, selectedFileId]);
 
   const handleOptimize = useCallback(async () => {
-    if (!input.trim() && messages.length === 0) return;
     const feedback = input.trim();
     setInput("");
 
@@ -71,35 +84,40 @@ export default function ChatSection() {
         return;
       }
 
+      // Consume the raw OpenAI SSE stream
       const reader = res.body?.getReader();
       const decoder = new TextDecoder();
-      let reasoningBuffer = "";
-      let finalPrompt = "";
+      let fullText = "";
 
       while (reader) {
         const { done, value } = await reader.read();
         if (done) break;
         const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split("\n");
-        for (const line of lines) {
+
+        // Each SSE chunk may contain multiple lines
+        for (const line of chunk.split("\n")) {
           if (!line.startsWith("data: ")) continue;
           const data = line.slice(6).trim();
           if (data === "[DONE]") break;
           try {
             const parsed = JSON.parse(data);
-            if (parsed.type === "reasoning") {
-              reasoningBuffer += parsed.content;
-              updateLastAssistantMessage(`**Thinking...**\n\n${reasoningBuffer}`);
-            } else if (parsed.type === "prompt") {
-              finalPrompt = parsed.content;
-              setOptimizedPrompt(finalPrompt);
-              updateLastAssistantMessage(
-                `**Thinking...**\n\n${reasoningBuffer}\n\n---\n**Optimized prompt generated.** Check the "optimized" tab.`
-              );
+            const delta = parsed.choices?.[0]?.delta?.content ?? "";
+            if (delta) {
+              fullText += delta;
+              updateLastAssistantMessage(fullText);
             }
           } catch (_) {}
         }
       }
+
+      // Extract and store the optimized prompt
+      const optimized = extractOptimizedPrompt(fullText);
+      setOptimizedPrompt(optimized);
+
+      // Append a separator note to the chat message
+      updateLastAssistantMessage(
+        fullText + "\n\n---\n✅ **Optimized prompt saved.** Check the \"optimized\" tab."
+      );
     } catch (err: any) {
       updateLastAssistantMessage(`Error: ${err.message}`);
     } finally {
@@ -107,7 +125,6 @@ export default function ChatSection() {
     }
   }, [
     input,
-    messages.length,
     addMessage,
     updateLastAssistantMessage,
     getContext,
@@ -141,29 +158,29 @@ export default function ChatSection() {
 
       const data = await res.json();
       if (data.error) {
-        const errMsg: ChatMessage = {
+        addMessage({
           id: crypto.randomUUID(),
           role: "assistant",
           content: `Test failed: ${data.error}`,
-        };
-        addMessage(errMsg);
+        });
       } else {
-        const output = typeof data.result === "string" ? data.result : JSON.stringify(data.result, null, 2);
+        const output =
+          typeof data.result === "string"
+            ? data.result
+            : JSON.stringify(data.result, null, 2);
         setActualOutput(output);
-        const successMsg: ChatMessage = {
+        addMessage({
           id: crypto.randomUUID(),
           role: "assistant",
-          content: "✅ Test complete. Check the **actual output** tab in the Output section.",
-        };
-        addMessage(successMsg);
+          content: "✅ Test complete. Check the **actual output** tab.",
+        });
       }
     } catch (err: any) {
-      const errMsg: ChatMessage = {
+      addMessage({
         id: crypto.randomUUID(),
         role: "assistant",
         content: `Test error: ${err.message}`,
-      };
-      addMessage(errMsg);
+      });
     } finally {
       setIsTesting(false);
     }
@@ -197,7 +214,10 @@ export default function ChatSection() {
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-center text-gray-500 px-4">
             <div className="text-3xl mb-3">🤖</div>
-            <p className="text-sm">Tell me what you&apos;d like to optimize, or just click <strong>Optimize</strong> to start.</p>
+            <p className="text-sm">
+              Tell me what you&apos;d like to optimize, or just click{" "}
+              <strong>Optimize</strong> to start.
+            </p>
           </div>
         )}
         {messages.map((msg) => (
@@ -261,13 +281,11 @@ function MessageBubble({ message }: { message: ChatMessage }) {
 }
 
 function MarkdownContent({ content }: { content: string }) {
-  // Simple markdown rendering: bold, italic, code, horizontal rule, line breaks
   const lines = content.split("\n");
   return (
     <div className="whitespace-pre-wrap break-words leading-relaxed">
       {lines.map((line, i) => {
         if (line === "---") return <hr key={i} className="border-gray-600 my-2" />;
-        // Bold: **text**
         const parts = line.split(/(\*\*[^*]+\*\*)/g);
         return (
           <span key={i}>

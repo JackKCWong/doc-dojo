@@ -6,22 +6,6 @@ Guidelines:
 - Include any output format requirements derived from the JSON schema.
 - Do not include the JSON schema itself in the output prompt — it will be appended automatically.
 
-Your response MUST be in the following format:
-<reasoning>
-Your step-by-step reasoning about what to improve and why.
-</reasoning>
-<prompt>
-The complete optimized prompt text.
-</prompt>`;
-
-export function parseOptimizationResponse(fullContent: string): {
-  reasoning: string;
-  prompt: string;
-} {
-  const reasoningMatch = fullContent.match(/<reasoning>([\s\S]*?)<\/reasoning>/);
-  const promptMatch = fullContent.match(/<prompt>([\s\S]*?)<\/prompt>/);
-  return {
-    reasoning: reasoningMatch?.[1]?.trim() ?? "",
-    prompt: promptMatch?.[1]?.trim() ?? fullContent,
-  };
-}
+Respond with:
+1. A brief reasoning section explaining what you improved and why.
+2. The complete optimized prompt, clearly separated with "--- OPTIMIZED PROMPT ---".`;

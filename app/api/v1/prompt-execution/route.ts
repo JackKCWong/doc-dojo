@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
-import { jsonToZod } from "@/app/lib/quicktype-helpers";
+import { jsonToSchema } from "@/app/lib/quicktype-helpers";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY ?? "",
@@ -19,32 +19,39 @@ export async function POST(req: NextRequest) {
     expected_output: string;
   };
 
-  // Replace {{context}} with actual context
-  const resolvedPrompt = prompt.replace(/\{\{context\}\}/g, context ?? "");
+  console.log("[prompt-execution] expected_output:", expected_output?.slice(0, 100));
 
-  // Convert expected_output to Zod schema for validation hint
-  let zodSchema = "";
+  // 1. Build resolved prompt (context is passed separately as user message)
+  const resolvedPrompt = prompt;
+
+  // 2. Convert expected_output to JSON Schema and use as a system hint
+  let schemaHint = "";
   try {
-    zodSchema = await jsonToZod(expected_output ?? "{}");
-  } catch (_) {
-    zodSchema = "";
+    if (expected_output && expected_output.trim() !== "") {
+      schemaHint = await jsonToSchema(expected_output);
+    }
+  } catch (e) {
+    console.warn("[prompt-execution] Could not build JSON schema from expected_output:", e);
   }
 
-  const systemPrompt = zodSchema
-    ? `You are a helpful AI. Return your response as valid JSON matching this Zod schema:\n\n${zodSchema}`
-    : "You are a helpful AI. Return your response as valid JSON.";
+  const fullSystemPrompt = schemaHint
+    ? `${resolvedPrompt}\n\nReturn your response as valid JSON matching this JSON Schema:\n\n${schemaHint}`
+    : `${resolvedPrompt}\n\nReturn your response as valid JSON.`;
+
+  console.log("[prompt-execution] fullSystemPrompt:\n", fullSystemPrompt);
 
   try {
     const completion = await openai.chat.completions.create({
       model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
       messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: resolvedPrompt },
+        { role: "system", content: fullSystemPrompt },
+        { role: "user", content: `document: ${context}` },
       ],
       response_format: { type: "json_object" },
     });
 
     const content = completion.choices[0]?.message?.content ?? "{}";
+
     let result: unknown;
     try {
       result = JSON.parse(content);
