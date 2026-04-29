@@ -32,6 +32,7 @@ export default function ChatSection() {
     isTesting,
     setIsOptimizing,
     setIsTesting,
+    setOutputTab,
   } = useAppStore();
 
   const [input, setInput] = useState("");
@@ -169,10 +170,11 @@ export default function ChatSection() {
             ? data.result
             : JSON.stringify(data.result, null, 2);
         setActualOutput(output);
+        setOutputTab("diff");
         addMessage({
           id: crypto.randomUUID(),
           role: "assistant",
-          content: "✅ Test complete. Check the **actual output** tab.",
+          content: "✅ Test complete. Showing **diff** view in the output panel.",
         });
       }
     } catch (err: any) {
@@ -191,6 +193,7 @@ export default function ChatSection() {
     getContext,
     addMessage,
     setActualOutput,
+    setOutputTab,
     setIsTesting,
   ]);
 

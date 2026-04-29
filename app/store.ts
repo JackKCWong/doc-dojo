@@ -49,6 +49,8 @@ interface AppState {
   isTesting: boolean;
   setIsOptimizing: (v: boolean) => void;
   setIsTesting: (v: boolean) => void;
+  outputTab: "expected" | "actual" | "diff";
+  setOutputTab: (tab: "expected" | "actual" | "diff") => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -97,4 +99,6 @@ export const useAppStore = create<AppState>((set) => ({
   isTesting: false,
   setIsOptimizing: (v) => set({ isOptimizing: v }),
   setIsTesting: (v) => set({ isTesting: v }),
+  outputTab: "expected",
+  setOutputTab: (tab) => set({ outputTab: tab }),
 }));

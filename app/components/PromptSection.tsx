@@ -28,10 +28,11 @@ export default function PromptSection() {
     actualOutput,
     setOriginalPrompt,
     setExpectedOutput,
+    outputTab,
+    setOutputTab,
   } = useAppStore();
 
   const [promptTab, setPromptTab] = useState<PromptTab>("original");
-  const [outputTab, setOutputTab] = useState<OutputTab>("expected");
 
   return (
     <div className="flex flex-col h-full border-x border-gray-700" style={{ width: "40%" }}>
