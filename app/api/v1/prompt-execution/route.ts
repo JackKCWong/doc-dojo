@@ -1,10 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
-import { jsonToSchema } from "@/app/lib/quicktype-helpers";
+import Instructor from "@instructor-ai/instructor";
+import { z } from "zod";
+import { jsonToZodSchema } from "@/app/lib/quicktype-helpers";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY ?? "",
   baseURL: process.env.OPENAI_BASE_URL,
+});
+
+const client = Instructor({
+  client: openai,
+  mode: "JSON",
+  debug: true,
 });
 
 export async function POST(req: NextRequest) {
@@ -21,47 +29,39 @@ export async function POST(req: NextRequest) {
 
   console.log("[prompt-execution] expected_output:", expected_output?.slice(0, 100));
 
-  // 1. Build resolved prompt (context is passed separately as user message)
-  const resolvedPrompt = prompt;
-
-  // 2. Convert expected_output to JSON Schema and use as a system hint
-  let schemaHint = "";
-  try {
-    if (expected_output && expected_output.trim() !== "") {
-      schemaHint = await jsonToSchema(expected_output);
-    }
-  } catch (e) {
-    console.warn("[prompt-execution] Could not build JSON schema from expected_output:", e);
+  if (!expected_output || expected_output.trim() === "") {
+    return NextResponse.json({ error: "expected_output is required" }, { status: 400 });
   }
 
-  const fullSystemPrompt = schemaHint
-    ? `${resolvedPrompt}\n\nReturn your response as valid JSON matching this JSON Schema:\n\n${schemaHint}`
-    : `${resolvedPrompt}\n\nReturn your response as valid JSON.`;
-
-  console.log("[prompt-execution] fullSystemPrompt:\n", fullSystemPrompt);
+  let zodSchema: z.ZodTypeAny;
 
   try {
-    const completion = await openai.chat.completions.create({
+    zodSchema = await jsonToZodSchema(expected_output);
+    console.log("[prompt-execution] zodSchema:", JSON.stringify(zodSchema.toJSON(), null, 2));
+    console.log("[prompt-execution] Using instructor structured output");
+  } catch (e) {
+    console.error("[prompt-execution] Could not build Zod schema from expected_output:", e);
+    return NextResponse.json({ error: "Invalid expected_output JSON schema" }, { status: 400 });
+  }
+
+  try {
+    const completion = await client.chat.completions.create({
       model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
       messages: [
-        { role: "system", content: fullSystemPrompt },
+        { role: "system", content: prompt },
         { role: "user", content: `document: ${context}` },
       ],
-      response_format: { type: "json_object" },
+      response_model: {
+        schema: zodSchema,
+        name: "structured_output",
+      } as any,
+      max_retries: 3,
     });
 
-    const content = completion.choices[0]?.message?.content ?? "{}";
-
-    let result: unknown;
-    try {
-      result = JSON.parse(content);
-    } catch {
-      result = content;
-    }
-
-    return NextResponse.json({ result });
+    console.log("[prompt-execution] completion:", JSON.stringify(completion, null, 2));
+    return NextResponse.json(completion);
   } catch (err: any) {
-    console.error("[prompt-execution] OpenAI error:", err?.status, err?.message, err?.error);
+    console.error("[prompt-execution] Instructor error:", err?.status, err?.message, err?.error);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
