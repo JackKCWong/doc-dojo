@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
 
   try {
     zodSchema = await jsonToZodSchema(expected_output);
-    console.log("[prompt-execution] zodSchema:", JSON.stringify(zodSchema.toJSON(), null, 2));
+    console.log("[prompt-execution] zodSchema:", JSON.stringify(zodSchema.toJSONSchema(), null, 2));
     console.log("[prompt-execution] Using instructor structured output");
   } catch (e) {
     console.error("[prompt-execution] Could not build Zod schema from expected_output:", e);
