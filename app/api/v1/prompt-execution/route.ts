@@ -59,7 +59,8 @@ export async function POST(req: NextRequest) {
     });
 
     console.log("[prompt-execution] completion:", JSON.stringify(completion, null, 2));
-    return NextResponse.json(completion);
+    const { _meta, ...result } = completion;
+    return NextResponse.json({ result });
   } catch (err: any) {
     console.error("[prompt-execution] Instructor error:", err?.status, err?.message, err?.error);
     return NextResponse.json({ error: err.message }, { status: 500 });
